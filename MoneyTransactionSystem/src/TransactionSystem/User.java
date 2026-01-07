@@ -136,4 +136,70 @@ public class User {
         }
 
     }
+
+    // OPTION 4 - Deposit Money
+    public void depositAmount(){
+
+        System.out.println("Enter your Account Number : ");
+        String account_no = scanner.nextLine();
+
+        System.out.println("Enter your PIN : ");
+        int pin = scanner.nextInt();
+        scanner.nextLine();
+
+        System.out.println("[ DEPOSIT or WITHDRAW ]");
+        String type = scanner.nextLine().toUpperCase();
+
+        System.out.println("Enter your amount : ");
+        double amount = scanner.nextDouble();
+
+
+        try{
+            checkAccountNum(account_no);
+
+            String checkAccountQuery = "SELECT id from user WHERE account_no = ? AND pin = ?";
+
+            PreparedStatement checkStatement = connection.prepareStatement(checkAccountQuery);
+            checkStatement.setString(1,account_no);
+            checkStatement.setInt(2,pin);
+
+            ResultSet resultSet = checkStatement.executeQuery();
+            if (!resultSet.next()){
+                System.out.println("Invalid account number or PIN !!");
+            }
+
+
+            int userId = resultSet.getInt("id");
+
+            String updateAmountQuery = "UPDATE user SET balance = balance + ? WHERE id = ? ";
+
+            PreparedStatement updateBalanceStatement = connection.prepareStatement(updateAmountQuery);
+            updateBalanceStatement.setDouble(1,amount);
+            updateBalanceStatement.setInt(2,userId);
+            updateBalanceStatement.executeUpdate();
+
+
+            String transactionQuery = "INSERT INTO transaction (type,account_id,amount) VALUES (?,?,?)";
+
+            PreparedStatement transactionStatement = connection.prepareStatement(transactionQuery);
+            transactionStatement.setString(1,type);
+            transactionStatement.setInt(2,userId);
+            transactionStatement.setDouble(2,amount);
+
+            int affectedRows = transactionStatement.executeUpdate();
+            if (affectedRows>0){
+                System.out.println("Transaction made successfully...");
+            }
+            else{
+                System.out.println("Transaction Failed !!");
+            }
+
+
+        } catch (InvalidAccountNumException e) {
+            System.out.println(e.getMessage());
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
 }
