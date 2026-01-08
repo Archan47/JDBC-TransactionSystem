@@ -1,29 +1,21 @@
 package TransactionSystem;
-
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Scanner;
 
-
-class InvalidAccountNumException extends Exception {
-    public InvalidAccountNumException(String message){
-        super(message);
-    }
-}
-
 public class User {
-    private Connection connection;
-    private Scanner scanner;
+    private final Connection connection;
+    private final Scanner scanner;
 
-    private void checkAccountNum(String account_num) throws InvalidAccountNumException{
+    public void checkAccountNum(String account_num) throws InvalidAccountNumException{
         if (account_num.length() != 11){
             throw new InvalidAccountNumException("Invalid Account Number!!\n Please enter correct account number.");
         }
     }
 
-    public User(Connection connection, Scanner scanner, int userId, String name, String account_num, int pin) {
+    public User(Connection connection, Scanner scanner) {
         this.connection = connection;
         this.scanner = scanner;
     }
@@ -73,26 +65,39 @@ public class User {
         }
     }
 
-    // OPTION 2 - See Account Details
-    public void ViewAccount(){
-        String query = "SELECT id,name,account_no from user";
+    // OPTION 2 - View Account Balance
+    public void ViewBalance() {
 
-        try{
+        System.out.println("Enter your Account Number : ");
+        String account_no = scanner.next();
+
+        try {
+            checkAccountNum(account_no);
+
+            String query = "SELECT name, balance FROM user WHERE account_no = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-            ResultSet resultSet = preparedStatement.executeQuery();
-            System.out.println("+----+-------------------+--------------+");
-            System.out.println("| id |       name        |  account_no  |");
-            System.out.println("+----+-------------------+--------------+");
+            preparedStatement.setString(1, account_no);
 
-            while(resultSet.next()){
-                int id = resultSet.getInt("id");
-                String name = resultSet.getString("name");
-                String account_no = resultSet.getString("account_no");
-                System.out.printf("|%-5s|%-20s|%-15s\n",id,name,account_no);
-                System.out.println("+----+-------------------+--------------+");
+            ResultSet resultSet = preparedStatement.executeQuery();
+
+            if (!resultSet.next()) {
+                System.out.println("Account not found !");
+                return;
             }
+
+            String name = resultSet.getString("name");
+            double balance = resultSet.getDouble("balance");
+
+            System.out.println("+-----------------+---------------+");
+            System.out.println("| Name            | Balance       |");
+            System.out.println("+-----------------+---------------+");
+            System.out.printf("| %-15s | %-13.2f |\n", name, balance);
+            System.out.println("+-----------------+---------------+");
+
         } catch (SQLException e) {
             e.printStackTrace();
+        } catch (InvalidAccountNumException e) {
+            System.out.println(e.getMessage());
         }
     }
 
@@ -141,14 +146,11 @@ public class User {
     public void depositAmount(){
 
         System.out.println("Enter your Account Number : ");
-        String account_no = scanner.nextLine();
+        String account_no = scanner.next();
 
         System.out.println("Enter your PIN : ");
         int pin = scanner.nextInt();
         scanner.nextLine();
-
-        System.out.println("[ DEPOSIT or WITHDRAW ]");
-        String type = scanner.nextLine().toUpperCase();
 
         System.out.println("Enter your amount : ");
         double amount = scanner.nextDouble();
@@ -156,6 +158,8 @@ public class User {
 
         try{
             checkAccountNum(account_no);
+
+            connection.setAutoCommit(false);
 
             String checkAccountQuery = "SELECT id from user WHERE account_no = ? AND pin = ?";
 
@@ -182,13 +186,14 @@ public class User {
             String transactionQuery = "INSERT INTO transaction (type,account_id,amount) VALUES (?,?,?)";
 
             PreparedStatement transactionStatement = connection.prepareStatement(transactionQuery);
-            transactionStatement.setString(1,type);
+            transactionStatement.setString(1,"DEPOSIT");
             transactionStatement.setInt(2,userId);
-            transactionStatement.setDouble(2,amount);
+            transactionStatement.setDouble(3,amount);
 
             int affectedRows = transactionStatement.executeUpdate();
             if (affectedRows>0){
-                System.out.println("Transaction made successfully...");
+                System.out.println("Deposit Transaction made successfully...");
+                connection.commit();
             }
             else{
                 System.out.println("Transaction Failed !!");
@@ -202,4 +207,87 @@ public class User {
         }
     }
 
+
+    // OPTION 5 - Withdraw Amount
+    public void withdrawAmount() {
+
+        System.out.println("Enter your Account number : ");
+        String account_no = scanner.next();
+
+        System.out.println("Enter your PIN : ");
+        int pin = scanner.nextInt();
+        scanner.nextLine(); // consume newline
+
+        System.out.println("Enter your amount : ");
+        double amount = scanner.nextDouble();
+
+        try {
+            checkAccountNum(account_no);
+
+            connection.setAutoCommit(false);
+
+            // Verify account, pin & get balance
+            String checkQuery = "SELECT id, balance FROM user WHERE account_no = ? AND pin = ?";
+            PreparedStatement checkStmt = connection.prepareStatement(checkQuery);
+            checkStmt.setString(1, account_no);
+            checkStmt.setInt(2, pin);
+
+            ResultSet resultSet = checkStmt.executeQuery();
+
+            if (!resultSet.next()) {
+                System.out.println("Invalid account number or PIN !!");
+                connection.rollback();
+                return;
+            }
+
+            int userId = resultSet.getInt("id");
+            double balance = resultSet.getDouble("balance");
+
+            // STEP 2: Check sufficient balance
+            if (balance < amount) {
+                System.out.println("Insufficient balance!");
+                connection.rollback();
+                return;
+            }
+
+            // Update balance
+            String updateBalanceQuery = "UPDATE user SET balance = balance - ? WHERE id = ?";
+            PreparedStatement updateStmt = connection.prepareStatement(updateBalanceQuery);
+            updateStmt.setDouble(1, amount);
+            updateStmt.setInt(2, userId);
+            updateStmt.executeUpdate();
+
+            // Insert transaction record
+            String txnQuery = "INSERT INTO transaction (type, account_id, amount) VALUES (?, ?, ?)";
+            PreparedStatement txnStmt = connection.prepareStatement(txnQuery);
+            txnStmt.setString(1, "WITHDRAW");
+            txnStmt.setInt(2, userId);
+            txnStmt.setDouble(3, amount);
+            txnStmt.executeUpdate();
+
+            connection.commit();
+            System.out.println("Withdrawal successful!");
+
+        } catch (InvalidAccountNumException e) {
+            System.out.println(e.getMessage());
+        } catch (SQLException e) {
+            try {
+                connection.rollback();
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+            }
+            e.printStackTrace();
+        } finally {
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+
 }
+
+
+
